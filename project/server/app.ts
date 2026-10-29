@@ -7,13 +7,20 @@ import { config } from './config';
 import { AppError, ValidationError } from './errors';
 import { createStore, type Store } from './store';
 import { ingest } from './analyze';
-import { validate } from './validate';
+import { roomId, validate } from './validate';
 import { INITIAL_ROOMS } from '../src/data/rooms';
 
-/** Seeds the six demo rooms the dashboard expects, but only into an empty database. */
+/**
+ * ใส่ห้องเดโมหกห้องที่ dashboard คาดหวัง ลงฐานข้อมูลที่ยังว่างเท่านั้น
+ *
+ * id ต้องมาจาก roomId(building, roomNumber) ตัวเดียวกับที่ ingest() ใช้ ไม่ใช่ id ที่เขียน
+ * มือไว้ใน src/data/rooms.ts ซึ่งเป็นข้อมูลที่ frontend ใช้ใน local mode ถ้าสองฝั่งสร้าง id
+ * ไม่ตรงกัน telemetry ของห้องเดิมจะไปสร้างแถวใหม่ ทำให้ห้องซ้ำและห้องที่งอกใหม่เสีย zone เดิม
+ */
 function seed(store: Store): void {
   if (!store.isEmpty()) return;
-  for (const room of INITIAL_ROOMS) store.upsertRoom({ ...room, lastUpdated: Date.now() });
+  for (const room of INITIAL_ROOMS)
+    store.upsertRoom({ ...room, id: roomId(room.building, room.roomNumber), lastUpdated: Date.now() });
   store.recordEvent('info', `seeded ${INITIAL_ROOMS.length} rooms`);
 }
 

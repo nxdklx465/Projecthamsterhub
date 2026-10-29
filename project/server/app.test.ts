@@ -7,7 +7,8 @@ import type { Server } from 'node:http';
 import { createApp } from './app';
 import { openDb } from './db';
 import { createStore } from './store';
-import { validate } from './validate';
+import { roomId, validate } from './validate';
+import { INITIAL_ROOMS } from '../src/data/rooms';
 import type { ErrorResponse, ReadingsResponse, RoomsResponse, TelemetryResponse } from './contract';
 
 const db = openDb(':memory:');
@@ -43,7 +44,9 @@ describe('POST /api/telemetry', () => {
     expect(data.reasons.length).toBeGreaterThan(0);
     expect(data.monthly.baht).toBeGreaterThan(0);
     expect(data.room.id).toBe('ecc-402');
-    expect(data.room.zone).toBe('Engineering'); // kept from the seeded room, not reset to Simulated
+    // 'ECC' ไม่ใช่อาคารที่ seed ไว้ ('ECC Building') ห้องนี้จึงเป็นห้องใหม่ และได้ zone 'Simulated'
+    // การรักษา zone ของห้องที่ seed ไว้ ตรวจใน describe 'seeded room identity' ด้านล่าง
+    expect(data.room.zone).toBe('Simulated');
   });
 
   it('reports normal when occupied', async () => {
@@ -127,6 +130,28 @@ describe('persistence', () => {
 });
 
 describe('fault tolerance', () => {
+  it('records the rejected field reasons in events and keeps serving requests', async () => {
+    const expectedErrors = [
+      'building is required (max 40 chars)',
+      'current must be a number between 0 and 100 (A)',
+    ];
+    const expectedEventMessage = `REJECTED telemetry: ${expectedErrors.join('; ')}`;
+    const before = db.prepare('SELECT COUNT(*) AS n FROM readings WHERE room_id = ?').get('ecc-402') as { n: number };
+
+    const res = await post({ ...good, building: 'x'.repeat(41), current: -1 });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as ErrorResponse).errors).toEqual(expectedErrors);
+
+    const event = db.prepare('SELECT level, message FROM events WHERE message = ?').get(expectedEventMessage) as
+      | { level: string; message: string }
+      | undefined;
+    expect(event).toEqual({ level: 'warn', message: expectedEventMessage });
+
+    const after = db.prepare('SELECT COUNT(*) AS n FROM readings WHERE room_id = ?').get('ecc-402') as { n: number };
+    expect(after.n).toBe(before.n);
+    expect((await fetch(`${base}/api/health`)).status).toBe(200);
+  });
+
   it('records every rejection instead of dropping it', () => {
     const store = createStore(db);
     const before = store.listRooms().length;
@@ -138,5 +163,49 @@ describe('fault tolerance', () => {
   it('skips the z-score until there is enough history', () => {
     const store = createStore(db);
     expect(store.recentCurrents('room-with-no-history', 20)).toEqual([]);
+  });
+});
+
+// Regression: seed() ต้องใส่ห้องด้วย id เดียวกับที่ roomId() สร้างจาก building และ roomNumber
+// ไม่ใช่ id ที่เขียนมือไว้ใน src/data/rooms.ts มิฉะนั้น telemetry ของห้องเดิมจะไปสร้างแถวใหม่
+// ทำให้ dashboard เห็น 12 ห้องแทน 6 ห้อง และห้องที่งอกใหม่ได้ zone 'Simulated'
+describe('seeded room identity', () => {
+  it('seeds every room under the id roomId() builds, with its zone', async () => {
+    const rooms = (await (await fetch(`${base}/api/rooms`)).json()) as RoomsResponse;
+    for (const seeded of INITIAL_ROOMS) {
+      const id = roomId(seeded.building, seeded.roomNumber);
+      const found = rooms.rooms.find((r) => r.id === id);
+      expect(found, `seeded room ${seeded.building} ${seeded.roomNumber} must exist as id ${id}`).toBeDefined();
+      expect(found?.zone).toBe(seeded.zone);
+    }
+  });
+
+  it('updates the seeded room instead of creating a duplicate', async () => {
+    const seeded = INITIAL_ROOMS[0];
+    const expectedId = roomId(seeded.building, seeded.roomNumber);
+    const before = (await (await fetch(`${base}/api/rooms`)).json()) as RoomsResponse;
+
+    const res = await post({
+      building: seeded.building,
+      roomNumber: seeded.roomNumber,
+      current: 3.1,
+      voltage: 220,
+      motion: true,
+    });
+    const data = (await res.json()) as TelemetryResponse;
+    expect(res.status).toBe(200);
+
+    // identity ไม่ใช่จำนวนอย่างเดียว: id ต้องเป็นค่าที่ roomId() สร้าง และ zone ต้องเป็นค่าเดิมจาก seed
+    expect(data.room.id).toBe(expectedId);
+    expect(data.room.zone).toBe(seeded.zone);
+
+    const after = (await (await fetch(`${base}/api/rooms`)).json()) as RoomsResponse;
+    expect(after.rooms.length).toBe(before.rooms.length);
+
+    // ห้องเดียวกันต้องมีแถวเดียว ไม่ใช่สองแถวที่ id ต่างกัน
+    const ids = after.rooms
+      .filter((r) => r.building === seeded.building && r.roomNumber === seeded.roomNumber)
+      .map((r) => r.id);
+    expect(ids).toEqual([expectedId]);
   });
 });

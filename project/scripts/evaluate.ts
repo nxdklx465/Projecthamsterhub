@@ -43,9 +43,9 @@ const gauss = (mean: number, sd: number) =>
 // ---------------------------------------------------------------------------
 // Scenario generator
 // ---------------------------------------------------------------------------
-type Label = 'normal_occupied' | 'normal_idle' | 'lights_left_on' | 'subtle_waste';
+export type Label = 'normal_occupied' | 'normal_idle' | 'lights_left_on' | 'subtle_waste';
 
-type Sample = {
+export type Sample = {
   roomId: string;
   ts: number;
   current: number;
@@ -68,7 +68,7 @@ const SAMPLES_PER_HOUR = Number(process.env.EVAL_SAMPLES_PER_HOUR) || 4;
 const START = new Date(2026, 9, 26, 0, 0, 0).getTime();
 const HOUR = 3_600_000;
 
-function generate(): Sample[] {
+export function generate(): Sample[] {
   const samples: Sample[] = [];
   const rooms = Array.from({ length: ROOMS }, (_, i) => ({
     id: `room-${i + 1}`,
@@ -154,12 +154,12 @@ const BASELINE_OPTS: BaselineOptions = {
 };
 const HISTORY_WINDOW = 20;
 
-type Level = 'L1' | 'L1+L2' | 'L1+L2+L3';
+export type Level = 'L1' | 'L1+L2' | 'L1+L2+L3';
 
 /** Why an L3 judgement did not happen. Reported, never swallowed. */
 type Skips = { insufficient_history: number; baseline_too_flat: number; judged: number };
 
-function run(level: Level, samples: Sample[]): { predicted: boolean[]; skips: Skips } {
+export function run(level: Level, samples: Sample[]): { predicted: boolean[]; skips: Skips } {
   const history = new Map<string, number[]>();
   const baselines = new Map<string, BaselineStats>();
   const out: boolean[] = [];

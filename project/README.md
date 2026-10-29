@@ -2,7 +2,7 @@
 
 Dashboard แบบห้อง Control Room: จำลองบอร์ด IoT (กระแส, แรงดัน, มีคนอยู่หรือไม่) → วิเคราะห์ Energy Waste → ไฟแดง/เขียวแบบ real-time
 
-## รัน (ต้องมี Node.js 18+)
+## รัน (ต้องมี Node.js 22.12+)
 ```
 npm install
 npm run dev          # http://localhost:5173  (โหมด Local ไม่ต้องมี backend)

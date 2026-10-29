@@ -1,6 +1,22 @@
 // The metric function has to be right before any table it produces means anything.
-import { describe, expect, it } from 'vitest';
-import { score } from './evaluate';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { generate, run, score } from './evaluate';
+
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+let evaluationDir = '';
+
+beforeAll(() => {
+  evaluationDir = mkdtempSync(join(tmpdir(), 'kses-evaluate-'));
+});
+
+afterAll(() => {
+  if (evaluationDir) rmSync(evaluationDir, { recursive: true, force: true });
+});
 
 describe('score', () => {
   it('counts a worked example correctly', () => {
@@ -47,5 +63,45 @@ describe('score', () => {
 
   it('refuses mismatched lengths instead of scoring nonsense', () => {
     expect(() => score([true], [true, false])).toThrow(/differ in length/);
+  });
+});
+
+describe('M3 evaluator', () => {
+  it('runs the evaluator CLI and produces the same seed-42 report twice outside the project', () => {
+    const env: NodeJS.ProcessEnv = { ...process.env, EVAL_SEED: '42' };
+    delete env.EVAL_DAYS;
+    delete env.EVAL_SAMPLES_PER_HOUR;
+    delete env.EVAL_K;
+    delete env.EVAL_ALPHA;
+    delete env.EVAL_MIN_SAMPLES;
+
+    const runCli = () =>
+      execFileSync(
+        process.execPath,
+        [resolve(projectRoot, 'node_modules/tsx/dist/cli.mjs'), resolve(projectRoot, 'scripts/evaluate.ts')],
+        { cwd: evaluationDir, env, encoding: 'utf8' },
+      );
+
+    const firstOutput = runCli();
+    const firstReport = readFileSync(join(evaluationDir, 'EVALUATION.md'), 'utf8');
+    const secondOutput = runCli();
+    const secondReport = readFileSync(join(evaluationDir, 'EVALUATION.md'), 'utf8');
+
+    expect(firstOutput).toBe(secondOutput);
+    expect(firstReport).toBe(secondReport);
+    expect(firstReport).toContain('Seed `42` · 28 days · 6 rooms · 16128 readings');
+    expect(firstReport).toContain('| L1+L2+L3 | 90.5% | 74.5% | 81.7% | 822 | 86 | 282 | 14938 |');
+    expect(firstReport).toContain('| judged against a baseline | 10660 |');
+  });
+
+  it('replays the chronological prefix identically without seeing future readings', () => {
+    const samples = generate();
+    const timestamps = samples.map((sample) => sample.ts);
+    expect(timestamps).toEqual([...timestamps].sort((a, b) => a - b));
+
+    const prefixLength = Math.floor(samples.length / 2);
+    const fullReplay = run('L1+L2+L3', samples);
+    const prefixReplay = run('L1+L2+L3', samples.slice(0, prefixLength));
+    expect(prefixReplay.predicted).toEqual(fullReplay.predicted.slice(0, prefixLength));
   });
 });

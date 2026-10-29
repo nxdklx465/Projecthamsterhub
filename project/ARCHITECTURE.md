@@ -204,7 +204,7 @@ erDiagram
 | ประวัติห้องน้อยกว่า 5 ค่า | ข้าม z-score ใช้ rule อย่างเดียว |
 | Component ฝั่ง UI เกิด error | Error Boundary แสดงปุ่ม RECOVER ✅ |
 | Storage ฝั่งเบราว์เซอร์เต็ม/ถูกบล็อก | ทำงานต่อในหน่วยความจำ ✅ |
-| API ไม่ตอบ ✅ | Dashboard แสดงสถานะ OFFLINE และกลับไปโหมด Local |
+| API ไม่ตอบ | polling แสดง OFFLINE ได้; ตอนส่ง telemetry network/5xx อาจ fallback ไป local และแสดง success/online ต้องแก้ UX และทดสอบโดย nackjub |
 
 ---
 
@@ -227,9 +227,9 @@ erDiagram
 |---|---|---|
 | M0 ✅ | Frontend + Engine + Auto Simulation + CI | ส่งมอบแล้ว |
 | M0.5 ✅ | API Contract, mock API และสคริปต์จำลอง IoT | ส่งมอบแล้ว |
-| M1 | Backend Express + validation + SQLite + API | Implementation อยู่ใน branch; ยังไม่ merge หรือ deploy |
-| M2 | เชื่อม Dashboard กับ API และ fallback ออฟไลน์ (nackjub) | งานของ nackjub |
-| M3 | L3 baseline และชุดประเมินผล | Implementation และรายงานอยู่ใน branch; ยังไม่ merge |
+| M1 ✅ | Backend Express + validation + SQLite + API | DoD สำหรับเดโม local ผ่านที่ source commit `7c3bff3`; CI ของ SHA นี้ผ่านครบ ยังไม่ได้ deploy |
+| M2 | เชื่อม Dashboard กับ API และ fallback ออฟไลน์ (nackjub) | API integration ใช้งานได้; การแจ้ง success หลัง fallback เมื่อ API ล้มเหลวยังต้องส่งต่อให้ nackjub ตรวจ |
+| M3 ✅ | L3 baseline และชุดประเมินผล | ผ่าน DoD ใน local verification ของ branch ปัจจุบัน; ทดสอบรายงานซ้ำและ replay ตามเวลาแล้ว |
 | M4 (ทางเลือก) | L4, Telegram alert, ESP32 | ยังไม่ทำ |
 | M5 | รายงาน/พอร์ตและคลิปสาธิต | ยังไม่ทำ |
 
@@ -237,10 +237,10 @@ erDiagram
 
 **Definition of Done**
 
-- API จริงทำตาม `project/API_CONTRACT.md` และผ่าน `project/server/api.test.ts` โดยไม่แก้ acceptance test
-- Validation ปฏิเสธข้อมูลผิด บันทึกเหตุการณ์พร้อมเหตุผล และ API ยังทำงานต่อได้
+- API จริงทำตาม `project/API_CONTRACT.md`; `project/server/api.test.ts` เรียก contract suite เดียวกันกับทั้ง Express จริงและ mock โดยไม่แก้ `project/API_CONTRACT.md`
+- Validation ปฏิเสธข้อมูลผิด บันทึก event พร้อมเหตุผลใน SQLite และ API ยังทำงานต่อได้; `app.test.ts` ตรวจเหตุผลในตาราง `events` และยืนยันว่าไม่มี reading ผิดถูกบันทึก
 - SQL ใช้ prepared statements เท่านั้น; `readings` เป็น append-only และไม่มีเส้นทางแก้ไขหรือลบ
-- `npm ci`, typecheck, lint, test และ build ผ่านจาก `project/`; CI ของ branch ผ่านครบ
+- `npm ci`, typecheck, lint, test และ build ผ่านใน GitHub Actions ของ source commit ที่ส่งขึ้น branch; ผล local verification ล่าสุดอยู่ในหัวข้อ 8 ด้านล่าง
 - ไม่ commit `.env` หรือ `project/dist/`
 
 ### M3 — L3 และการประเมินผล
@@ -251,17 +251,32 @@ erDiagram
 - `npm run evaluate` สร้างผลซ้ำได้จากข้อมูลสังเคราะห์ตามลำดับเวลา โดยไม่ใช้ข้อมูลอนาคต
 - รายงาน Precision, Recall, F1, ผลแยกประเภท และจำนวน readings ที่ L3 ประเมินหรือข้าม พร้อมระบุข้อจำกัดและสมมติฐาน
 
-ผลที่มีใน branch ปัจจุบัน (4 สัปดาห์, 6 ห้อง, 16,128 readings, seed 42): L1 ได้ Precision/Recall/F1 = 100.0%/53.5%/69.7%; L1+L2 = 90.1%/66.9%/76.8%; L1+L2+L3 = 90.5%/74.5%/81.7%. L3 ประเมิน 10,660 readings, ข้ามเพราะประวัติน้อย 5,444 readings และข้ามเพราะ baseline เรียบเกินไป 24 readings เลือก `BASELINE_K=6` จากการ sweep: Recall คงที่ 74.5% ระหว่าง k=3–6 ขณะที่ Precision เพิ่มจาก 75.2% เป็น 90.5%; ผลยังคงเหมาะสมบน seed 42, 7, 99 และ 2026 ดูรายงานเต็มที่ [EVALUATION.md](EVALUATION.md)
+ผลที่มีใน branch ปัจจุบัน (ข้อมูลสังเคราะห์ 4 สัปดาห์, 6 ห้อง, 16,128 readings, seed 42): L1 ได้ Precision/Recall/F1 = 100.0%/53.5%/69.7%; L1+L2 = 90.1%/66.9%/76.8%; L1+L2+L3 = 90.5%/74.5%/81.7%. L3 ประเมิน 10,660 readings, ข้ามเพราะประวัติน้อย 5,444 readings และข้ามเพราะ baseline เรียบเกินไป 24 readings เลือก `BASELINE_K=6` จากการ sweep: Recall คงที่ 74.5% ระหว่าง k=3–6 ขณะที่ Precision เพิ่มจาก 75.2% เป็น 90.5%; ผลยังคงเหมาะสมบน seed 42, 7, 99 และ 2026 ดูรายงานเต็มที่ [EVALUATION.md](EVALUATION.md)
+
+**Cold-start ของ L3:** baseline แยกตามห้องและ hour-of-week; ต้องมี readings ปกติที่สะสมอยู่ก่อนอย่างน้อย 5 รายการใน bucket นั้น L3 จึงจะตัดสิน reading ถัดไปได้ (ค่าเริ่มต้น `BASELINE_MIN_SAMPLES=5`). ระหว่างประวัติน้อยกว่า 5 จะข้ามด้วย `insufficient_history`; ถ้า EWMA standard deviation ต่ำกว่า `BASELINE_SD_FLOOR=0.05 A` จะข้ามด้วย `baseline_too_flat`. เฉพาะ reading ที่ผลสุดท้ายเป็น `Normal` จะเข้าฐาน จึงอาจใช้เวลานานขึ้นในห้อง/ช่วงเวลาที่มีแต่ telemetry ที่ถูกจัดเป็น waste. รายงาน evaluation แสดงจำนวนที่ตัดสินและข้าม แต่ API v1 ไม่ส่งตัวนับเหล่านี้เป็น endpoint แยก
 
 ### M2, M4 และ M5
 
-- **M2:** Dashboard อ่านข้อมูลจาก API จริง แสดง `OFFLINE` เมื่อ API ใช้งานไม่ได้ และกลับไป local mode ได้; ส่วนนี้เป็นงานของ nackjub
+- **M2:** Dashboard polling API จริงและเคยยืนยันการแสดงข้อมูลจาก backend แล้ว; ส่งต่อให้ nackjub ทดสอบ `OFFLINE` เมื่อ network/5xx ล้มเหลว เพราะ `upsertRoom` fallback ไป local analysis ได้ แต่ `handleSend` อาจยังแสดง success/online ทำให้เข้าใจว่า API รับข้อมูลแล้ว
 - **M4:** เป็นทางเลือกและต้องตกลง scope ก่อนทำ หากไม่มี L4 ห้ามเรียกระบบว่า machine learning
 - **M5:** รายงานและคลิปต้องตรงกับพฤติกรรมที่ตรวจสอบได้ ระบุว่าข้อมูลเป็นข้อมูลสังเคราะห์ และระบุว่าตัวเลขค่าไฟ/คาร์บอน/ชั่วโมง idle เป็นข้อสมมติ
 
-### สถานะการตรวจสอบล่าสุด
+### สถานะการตรวจสอบล่าสุด — 2026-10-29
 
-Implementation ของ M1/M3 อยู่ใน `docs/architecture-plan` และยังไม่ merge หรือ deploy รอบตรวจล่าสุดหยุดที่ `npm ci` ด้วย `EPERM` ขณะลบ `node_modules/@esbuild/win32-x64/esbuild.exe` จึงยังยืนยัน gate ล่าสุดไม่ได้ ห้ามระบุว่า CI หรือ DoD ผ่านจนกว่าจะมี output จริงยืนยัน
+source commit ที่ตรวจคือ `7c3bff33f4f938a777605bb5810c29c89bceea71` บน branch `fix/duplicate-seeded-rooms`; งานนี้ยืนยัน CI และ local verification สำหรับเดโม local โดยไม่ได้ deploy
+
+- GitHub Actions run [40833235157](https://github.com/mntoyg/Projecthamsterhub/actions/runs/40833235157) เป็น event `push` บน branch และ SHA นี้; job `build` สรุป `success` ทุกขั้น: `npm ci`, typecheck, lint, test และ build
+- local `npm run typecheck` และ `npm run lint` ผ่าน; `npm test` ผ่าน 5 files / 73 tests (ครั้งแรก sandbox ปฏิเสธ `realpath` ด้วย `EPERM`; รันซ้ำในสิทธิ์ตรวจสอบแล้วผ่าน); `npm run build -- --outDir <temp>` ผ่าน 1,646 modules โดยไม่เขียนทับ `project/dist/`
+- ตรวจทบทวนเอกสาร commit `b737e9d` ซ้ำใน sandbox นี้: typecheck/lint ผ่าน แต่ `npm test` และ build ถูก sandbox ปฏิเสธที่ `realpath` ด้วย `EPERM` ก่อนเริ่มรัน tests/build จึงไม่ใช่ผลทดสอบที่ยืนยันว่าผ่านหรือเป็น assertion/compile failure; หลักฐาน CI ข้างต้นครอบคลุม source SHA `7c3bff3` ส่วน commit `b737e9d` เป็นเอกสารเท่านั้นและยังไม่มี CI ยืนยัน
+- `npm ci` ไม่รันซ้ำใน working tree เพราะคำสั่งนี้จะถอด `node_modules`; ใช้ผล install จาก CI ของ SHA เดียวกัน และตรวจแล้วว่าเครื่องมี `tsc`/`vitest` อยู่
+- API smoke แบบ in-process + HTTP ใช้ SQLite `:memory:`: ห้องเริ่มต้น 6 ห้องและ ID ไม่ซ้ำ; POST ถูกต้องได้ 200/`Energy Waste`, GET readings คืน power 4.4 kW; POST ผิดได้ 400 พร้อม `errors[]` และ health ยัง 200; CORS อนุญาต `http://localhost:5173` รวม preflight และไม่คืน allow-origin ให้ origin อื่น
+- smoke ต่อหลังมีข้อมูลและสร้าง app ใหม่บน DB เดิม: readings ยังอยู่, rooms ยังเป็น 6 ID ที่ถูกต้อง, POST ห้องเดิมไม่สร้าง duplicate
+- ตรวจฐานข้อมูลเดิมแบบ read-only: `k-ses.db` มี 7 rooms รวม ID เก่ากับ ID ใหม่ของ `ECC Building/402`; `k-ses-demo.db` มี 12 rooms ที่มีคู่ซ้ำ; `verify-fix.db` มี 6 canonical IDs ไม่ซ้ำ ไฟล์เหล่านี้ไม่ได้ถูกแก้ ใช้ `DB_FILE=:memory:` สำหรับเดโมเพื่อไม่แสดง duplicate และไม่แตะข้อมูลเดิม
+- `$env:EVAL_SEED='42'; npm run evaluate` ทำงานใน temp directory ได้ metrics ตรงรายงาน seed 42; SHA-256 ของ `project/EVALUATION.md` ก่อน/หลังเท่ากัน ไม่ได้เขียนทับไฟล์ที่ติดตามใน Git
+- npm audit ปัจจุบัน: รวม 14 รายการ (low 1, moderate 4, high 9, critical 0); `--omit=dev` เหลือ high 1 คือ transitive `ws@8.18.3` จาก Supabase Realtime ตาม [GHSA-58qx-3vcg-4xpx](https://github.com/advisories/GHSA-58qx-3vcg-4xpx); audit ระบุว่ามี fix แต่ไม่อัปเกรดก่อนเดโม ให้ทบทวน lockfile และรัน gate หลังเดโมก่อนเปิด public
+- ฐานข้อมูล SQLite เป็นไฟล์/หน่วยความจำของ process เดียว เหมาะกับเดโม local; ไม่ยืนยัน HA หรือ concurrent multi-instance และยังไม่มี public deployment
+- contract v1 ไม่มี route สำหรับ logs/events; `events` เป็นตารางภายใน backend และ `/api/events` ไม่ใช่ feed สำหรับ UI
+- ส่งต่อให้ nackjub: ทดสอบ network fail, HTTP 5xx, HTTP 4xx และ 2xx; network/5xx อาจ fallback ไป local แต่ flow ส่งยัง toast success/online ได้ ควรแสดง `LOCAL/OFFLINE` หรือ error ที่แยกชัดจาก backend success; งานนี้ไม่แก้ UI
 
 ## 9. ประเด็นที่ต้องตัดสินใจ (Open Decisions)
 
@@ -273,8 +288,41 @@ Implementation ของ M1/M3 อยู่ใน `docs/architecture-plan` แ�
 
 - เซนเซอร์เป็นการจำลอง ตัวเลขเงินและคาร์บอนอิงข้อสมมติ ไม่ใช่ข้อมูลวัดจริง
 - เกณฑ์ 7 A เป็นค่าตั้งต้น ควรปรับตามขนาดห้องและอุปกรณ์จริง
+- SQLite ใช้ไฟล์/หน่วยความจำของ process เดียว เหมาะกับเดโม local; เอกสารนี้ไม่ได้ยืนยัน HA, multi-instance หรือ production readiness
 
 ## 11. Deploy
+
+### เส้นทางเดโมในเครื่อง: API จริงและตัวจำลอง
+
+เปิดสาม PowerShell terminals ที่โฟลเดอร์ `project/`:
+
+1. Terminal API — ใช้ SQLite ในหน่วยความจำเพื่อไม่เขียนทับฐานข้อมูลเดิม:
+
+   ```powershell
+   $env:DB_FILE=':memory:'
+   $env:PORT='8799'
+   $env:CORS_ORIGINS='http://localhost:5173'
+   npm run server
+   ```
+
+2. Terminal ตัวจำลอง — รอให้ API แสดงว่า listening ก่อน แล้วส่ง telemetry ฉาก energy waste:
+
+   ```powershell
+   $env:API_URL='http://localhost:8799'
+   npm run simulate -- after
+   ```
+
+3. Terminal เว็บ — ให้ Vite ส่ง request ไปยัง API จริง:
+
+   ```powershell
+   $env:VITE_API_URL='http://localhost:8799'
+   npm run dev
+   ```
+
+ตรวจ API ได้ด้วย `Invoke-RestMethod http://localhost:8799/api/health` และ `Invoke-RestMethod http://localhost:8799/api/rooms`; หยุด API และตัวจำลองด้วย Ctrl+C เมื่อจบ การใช้ `:memory:` หมายถึงข้อมูลจะอยู่ตลอดอายุ process เท่านั้น
+
+- ข้อจำกัดสำหรับ UI demo: จนกว่าจะปรับ flow ของ frontend ตาม handoff ด้านบน การแจ้ง success อาจไม่ยืนยันว่า API รับ telemetry แล้ว หากต้องการหลักฐานการรับข้อมูลให้ดู status/response จาก API หรือ output ของตัวจำลองประกอบ
+- ไม่มี backend logs/events endpoint ใน contract ปัจจุบัน; log ที่เห็นใน terminal เป็น stdout ของ process และ event validation อยู่ใน SQLite ภายในเท่านั้น
 
 - Frontend: `npm run build` แล้วอัปโฟลเดอร์ `dist/` ขึ้น Vercel/Netlify/GitHub Pages
 - ตั้ง `VITE_API_URL` ตอน build ชี้ไปที่ API จริง (ต้อง HTTPS ถ้าเว็บเป็น HTTPS)
